@@ -7,3 +7,4 @@ pandas>=2.2.3
 colorama
 opencv-python>=4.8.1.78
 soundfile
+scikit-metrics 
