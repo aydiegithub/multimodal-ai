@@ -1,0 +1,9 @@
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
+torchcodec
+transformers>=4.35.0
+pandas>=2.2.3
+colorama
+opencv-python>=4.8.1.78
+soundfile
