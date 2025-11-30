@@ -154,12 +154,16 @@ class MultimodalTrainer:
         self.val_loader = val_loader
 
         # Log Dataset sizes
-        train_size = len(train_loader.dataset)
-        val_size = len(val_loader.dataset)
-        print("\nDataset sizes: ")
-        print(f"Training samples: {train_size:,}")
-        print(f"Validation samples: {val_size:,}")
-        print(f"Batches per epoch: {len(train_loader):,}")
+        # Handle case where loaders might be None (e.g. only testing)
+        if train_loader:
+            train_size = len(train_loader.dataset)
+            print("\nDataset sizes: ")
+            print(f"Training samples: {train_size:,}")
+            print(f"Batches per epoch: {len(train_loader):,}")
+
+        if val_loader:
+            val_size = len(val_loader.dataset)
+            print(f"Validation samples: {val_size:,}")
 
         timestamp = datetime.now().strftime('%b%d_%H-%M-%S')
         base_dir = '/opt/ml/output/tensorboard' if 'SM_MODEL_DIR' in os.environ else 'runs'
@@ -243,9 +247,10 @@ class MultimodalTrainer:
 
         for batch in self.train_loader:
             device = next(self.model.parameters()).device
+            # FIX: Changed 'text_input' to 'text_inputs' to match dataset.py
             text_inputs = {
-                'input_ids': batch['text_input']['input_ids'].to(device),
-                'attention_mask': batch['text_input']['attention_mask'].to(device),
+                'input_ids': batch['text_inputs']['input_ids'].to(device),
+                'attention_mask': batch['text_inputs']['attention_mask'].to(device),
             }
             video_frames = batch['video_frames'].to(device)
             audio_features = batch['audio_features'].to(device)
@@ -308,9 +313,10 @@ class MultimodalTrainer:
         with torch.inference_mode():
             for batch in data_loader:
                 device = next(self.model.parameters()).device
+                # FIX: Changed 'text_input' to 'text_inputs' to match dataset.py
                 text_inputs = {
-                    'input_ids': batch['text_input']['input_ids'].to(device),
-                    'attention_mask': batch['text_input']['attention_mask'].to(device),
+                    'input_ids': batch['text_inputs']['input_ids'].to(device),
+                    'attention_mask': batch['text_inputs']['attention_mask'].to(device),
                 }
                 video_frames = batch['video_frames'].to(device)
                 audio_features = batch['audio_features'].to(device)
@@ -346,13 +352,13 @@ class MultimodalTrainer:
 
         # Compute the precission and accuracy
         emotion_precision = precision_score(
-            all_emotion_labels, all_emotion_preds, average='weighted'
+            all_emotion_labels, all_emotion_preds, average='weighted', zero_division=0
         )
         emotion_accuracy = accuracy_score(
             all_emotion_labels, all_emotion_preds)
 
         sentiment_precision = precision_score(
-            all_sentiment_labels, all_sentiment_preds, average='weighted'
+            all_sentiment_labels, all_sentiment_preds, average='weighted', zero_division=0
         )
         sentiment_accuracy = accuracy_score(
             all_sentiment_labels, all_sentiment_preds)
@@ -360,9 +366,9 @@ class MultimodalTrainer:
         self.log_metrics(avg_loss, {
             "emotion_precision": emotion_precision,
             "emotion_accuracy": emotion_accuracy,
-            "sentiment_precision": emotion_accuracy,
+            "sentiment_precision": sentiment_precision,
             "sentiment_accuracy": sentiment_accuracy
-        })
+        }, phase=phase)
 
         if phase == "val":
             self.scheduler.step(avg_loss['total'])
@@ -373,53 +379,3 @@ class MultimodalTrainer:
             'sentiment_precision': sentiment_precision,
             'sentiment_accuracy': sentiment_accuracy
         }
-
-
-if __name__ == "__main__":
-    dataset = MELDDataset(
-        "../dataset/train/train_sent_emo.csv",
-        "../dataset/train/train_splits"
-    )
-
-    sample = dataset[0]
-
-    model = MultimodalSentimentModel()
-    model.eval()
-
-    text_inputs = {
-        'input_ids': sample['text_inputs']['input_ids'].unsqueeze(0),
-        'attention_mask': sample['text_inputs']['attention_mask'].unsqueeze(0)
-    }
-    video_frames = sample['video_frames'].unsqueeze(0)
-    audio_features = sample['audio_features'].unsqueeze(0)
-
-    with torch.inference_mode():
-        outputs = model(text_inputs, video_frames, audio_features)
-        emotions_probs = torch.softmax(outputs['emotions'], dim=1)[0]
-        sentiments_probs = torch.softmax(outputs['sentiments'], dim=1)[0]
-
-    emotion_map = {
-        0: "anger",
-        1: "disgust",
-        2: "fear",
-        3: "joy",
-        4: "neutral",
-        5: "sadness",
-        6: "surprise",
-    }
-
-    sentiment_map = {
-        0: "negative",
-        1: "neutral",
-        2: "positive",
-    }
-
-    for i, prob in enumerate(emotions_probs):
-        print(f"{emotion_map[i]}: {prob:.2f}")
-
-    print("\n" + "*"*50 + "\n")
-
-    for i, prob in enumerate(sentiments_probs):
-        print(f"{sentiment_map[i]}: {prob:.2f}")
-
-    print("Prediction for utterence")
