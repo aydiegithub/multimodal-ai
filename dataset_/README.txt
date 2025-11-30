@@ -5,6 +5,8 @@ MELD: Multimodal EmotionLines Dataset for Emotion Recognition in Multiparty Conv
 Version 1.0
 
 September 30th, 2018
+
+Download Link: https://affective-meld.github.io/
                                 
 Soujanya Poria‡, Devamanyu HazarikaΦ, Navonil Majumder†, Gautam Naik‡, Erik Cambria‡, Rada Mihalcea*
 ‡School of Computer Science and Engineering, Nanyang Technological Univerisity, Singapore

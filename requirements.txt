@@ -11,3 +11,5 @@ scikit-metrics
 tensorboard
 tqdm
 sagemaker
+openai-whisper
+moviepy
