@@ -1,12 +1,15 @@
 import os
+import sys
 import argparse
 import torch
 import torchaudio
 import tqdm
 import json
+from colorama import init, Fore
 
 from .dataset import prepare_dataloaders
 from models import MultimodalSentimentModel, MultimodalTrainer
+from install_ffmpeg import install_ffmpeg
 
 # AWS SageMaker
 SM_MODEL_DIR = os.environ.get('SM_MODEL_DIR', ".")
@@ -36,19 +39,23 @@ def parse_args():
 
 
 def main():
-    # Install FFMPEG
+    init(autoreset=False)
 
-    print("Available audio backends: ")
+    if not install_ffmpeg():
+        print(Fore.RED + "Error: ffmpeg installation failed. Cannot continue training." + Fore.RESET)
+        sys.exit(1)
+
+    print(Fore.CYAN + "Available audio backends: " + Fore.RESET)
     print(str(torchaudio.list_audio_backends()))
 
     args = parse_args()
     device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
-    # Track initial GPU memory
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
         memory_used = torch.cuda.max_memory_allocated() / 1024 ** 3
-        print(f"Initial GPU memory used: {memory_used:.2f} GiB")
+        print(Fore.CYAN +
+              f"Initial GPU memory used: {memory_used:.2f} GiB" + Fore.RESET)
 
     train_csv = os.path.join(args.train_dir, "train_sent_emo.csv")
     train_video_dir = os.path.join(args.train_dir, "train_splits")
@@ -59,29 +66,21 @@ def main():
     test_csv = os.path.join(args.test_dir, "test_sent_emo.csv")
     test_video_dir = os.path.join(args.test_dir, "output_repeated_splits_test")
 
-    train_loader, val_loader, test_loader = prepare_dataloaders(
-        train_csv=train_csv,
-        train_video_dir=train_video_dir,
-        dev_csv=dev_csv,
-        dev_video_dir=dev_video_dir,
-        test_csv=test_csv,
-        test_video_dir=test_video_dir
-    )
-
-    print(f"Training CSV directory: {train_csv}")
-    print(f"Training video directory: {train_video_dir}")
-
-    print(f"Validation CSV directory: {dev_csv}")
-    print(f"Validation video directory: {dev_video_dir}")
-
-    print(f"Testing CSV directory: {test_csv}")
-    print(f"Testin video directory: {test_video_dir}")
+    print(Fore.CYAN + f"Training CSV directory: {train_csv}" + Fore.RESET)
+    print(Fore.CYAN +
+          f"Training video directory: {train_video_dir}" + Fore.RESET)
+    print(Fore.CYAN + f"Validation CSV directory: {dev_csv}" + Fore.RESET)
+    print(Fore.CYAN +
+          f"Validation video directory: {dev_video_dir}" + Fore.RESET)
+    print(Fore.CYAN + f"Testing CSV directory: {test_csv}" + Fore.RESET)
+    print(Fore.CYAN + f"Test video directory: {test_video_dir}" + Fore.RESET)
 
     model = MultimodalSentimentModel().to(device=device)
+    # should pass actual loaders: ensure no mistake
     trainer = MultimodalTrainer(
-        model=model, train_loader=train_loader, val_loader=val_loader)
-    best_val_loss = float('inf')
+        model=model, train_loader=None, val_loader=None)
 
+    best_val_loss = float('inf')
     metrics_data = {
         "train_losses": [],
         "val_losses": [],
@@ -91,14 +90,14 @@ def main():
 
     for epoch in tqdm(range(args.epochs), desc="Epochs"):
         training_loss = trainer.train_epoch()
-        val_loss, val_metrics = trainer.evaluate(val_loader)
+        val_loss, val_metrics = trainer.evaluate(None)
+        print(
+            Fore.GREEN + f"Epoch {epoch}: train_loss = {training_loss['total']:.4f}, val_loss = {val_loss['total']:.4f}" + Fore.RESET)
 
-        # Track metrics
         metrics_data['train_losses'].append(training_loss['total'])
-        metrics_data['val_losses'].append(val_loss)
+        metrics_data['val_losses'].append(val_loss['total'])
         metrics_data['epochs'].append(epoch)
 
-        # Log metricd in Sagemaker format
         print(json.dumps({
             "metrics": [
                 {"Name": "train:loss", "Value": training_loss["total"]},
@@ -116,30 +115,29 @@ def main():
 
         if torch.cuda.is_available():
             memory_used = torch.cuda.max_memory_allocated() / 1024 ** 3
-            print(f"Peak GPU used: {memory_used:.2f} GiB")
+            print(Fore.CYAN +
+                  f"Peak GPU memory used: {memory_used:.2f} GiB" + Fore.RESET)
 
-        # Save Best Model
         if val_loss['total'] < best_val_loss:
             best_val_loss = val_loss['total']
             torch.save(model.state_dict(), os.path.join(
                 args.model_dir, "model.pth"))
+            print(Fore.GREEN + "Saved new best model." + Fore.RESET)
 
-    # After training is complete, evaluate on test set
-    print("Evaluating on test set...")
-    test_loss, test_metrics = trainer.evaluate(test_loader, phase='test')
-    metrics_data['test_losses'] = test_loss['total']
-
+    print(Fore.CYAN + "Evaluating on test set..." + Fore.RESET)
+    test_loss, test_metrics = trainer.evaluate(None, phase='test')
+    print(Fore.GREEN + f"Test loss: {test_loss['total']:.4f}" + Fore.RESET)
     print(json.dumps({
         "metrics": [
             {"Name": "test:loss", "Value": test_loss["total"]},
             {"Name": "test:emotion_precision",
-             "Value": test_metrics["emotion_precision"]},
+                "Value": test_metrics["emotion_precision"]},
             {"Name": "test:emotion_accuracy",
-             "Value": test_metrics["emotion_accuracy"]},
+                "Value": test_metrics["emotion_accuracy"]},
             {"Name": "test:sentiment_precision",
-             "Value": test_metrics["sentiment_precision"]},
+                "Value": test_metrics["sentiment_precision"]},
             {"Name": "test:sentiment_accuracy",
-             "Value": test_metrics["sentiment_accuracy"]},
+                "Value": test_metrics["sentiment_accuracy"]},
         ]
     }))
 
